@@ -91,7 +91,7 @@
       margin-bottom: 7px;
     }
 
-    input, textarea, select {
+    input, textarea {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 10px;
@@ -102,7 +102,7 @@
       outline: none;
       transition: border-color .15s, box-shadow .15s;
     }
-    input:focus, textarea:focus, select:focus {
+    input:focus, textarea:focus {
       border-color: var(--primary);
       box-shadow: 0 0 0 3px rgba(33,78,59,.08);
     }
@@ -228,7 +228,7 @@
           </div>
           <div>
             <label for="endChapter">End chapter</label>
-            <input id="endChapter" type="number" min="1" value="1" />
+            <input id="endChapter" type="number" min="1" value="10" />
           </div>
           <div>
             <label for="batchSize">Chapters per email</label>
@@ -248,8 +248,8 @@
       </section>
 
       <details>
-        <summary>What exactly gets emailed?</summary>
-        <p>Each email contains the chapter titles and source links for the range you selected. For example, chapters 30 through 400 with a batch size of 10 becomes 38 emails per recipient. The site does not copy third-party novel text.</p>
+        <summary>What gets emailed?</summary>
+        <p>Each email contains the chapter titles and source links for the range you selected. Chapters 30 through 400 with a batch size of 10 becomes 38 emails per recipient. The app asks for its access code once per browser session and does not copy third-party novel text.</p>
       </details>
     </div>
   </main>
@@ -258,8 +258,8 @@
   const state = { novel: null };
   const $ = (id) => document.getElementById(id);
 
-  // Vercel serves the API on the same origin. GitHub Pages can act as the public
-  // front end once the Vercel deployment is connected.
+  // The deployed Vercel app uses same-origin APIs. GitHub Pages remains a
+  // development preview and can point at the production Vercel backend.
   const API_BASE = location.hostname.endsWith('github.io')
     ? 'https://webnovel-emailer.vercel.app'
     : '';
@@ -268,6 +268,48 @@
     el.textContent = message;
     el.className = 'status' + (type ? ` ${type}` : '');
     el.style.display = message ? 'block' : 'none';
+  }
+
+  function getAccessKey(forceNew = false) {
+    if (forceNew) sessionStorage.removeItem('webnovelEmailerAccessKey');
+    let key = sessionStorage.getItem('webnovelEmailerAccessKey') || '';
+    if (!key) {
+      key = (prompt('Enter the Webnovel Emailer access code:') || '').trim();
+      if (key) sessionStorage.setItem('webnovelEmailerAccessKey', key);
+    }
+    return key;
+  }
+
+  async function apiPost(path, payload) {
+    const accessKey = getAccessKey();
+    if (!accessKey) throw new Error('An access code is required.');
+
+    let response = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-App-Key': accessKey
+      },
+      body: JSON.stringify(payload)
+    });
+    let data = await response.json();
+
+    if (response.status === 401) {
+      const replacement = getAccessKey(true);
+      if (!replacement) throw new Error('An access code is required.');
+      response = await fetch(`${API_BASE}${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-App-Key': replacement
+        },
+        body: JSON.stringify(payload)
+      });
+      data = await response.json();
+    }
+
+    if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+    return data;
   }
 
   function updateSummary() {
@@ -295,21 +337,14 @@
     setStatus($('findStatus'), 'Checking the novel and chapter list…');
 
     try {
-      const response = await fetch(`${API_BASE}/api/novel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Could not detect this novel.');
-
+      const data = await apiPost('/api/novel', { url });
       state.novel = data;
       $('novelTitle').textContent = data.title;
       $('chapterCount').textContent = `${data.total_chapters} chapters found`;
       $('startChapter').max = data.total_chapters;
       $('endChapter').max = data.total_chapters;
       $('startChapter').value = 1;
-      $('endChapter').value = data.total_chapters;
+      $('endChapter').value = Math.min(10, data.total_chapters);
       $('rangeSection').classList.remove('hidden');
       $('recipientSection').classList.remove('hidden');
       setStatus($('findStatus'), 'Novel found.', 'success');
@@ -331,8 +366,12 @@
     const end = Number($('endChapter').value);
     const batchSize = Number($('batchSize').value);
     const recipients = $('recipients').value.trim();
-    const emailCount = Math.ceil((end - start + 1) / batchSize);
+    const selected = end - start + 1;
+    const emailCount = Math.ceil(selected / batchSize);
 
+    if (start < 1 || end < start || end > state.novel.total_chapters || batchSize < 1) {
+      return setStatus($('sendStatus'), 'Choose a valid chapter range and batch size.', 'error');
+    }
     if (!recipients) return setStatus($('sendStatus'), 'Enter at least one recipient email.', 'error');
     if (emailCount > 10 && !confirm(`This will send ${emailCount} emails to each recipient. Continue?`)) return;
 
@@ -341,19 +380,13 @@
     setStatus($('sendStatus'), 'Sending your reading batches…');
 
     try {
-      const response = await fetch(`${API_BASE}/api/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: state.novel.source_url,
-          recipients,
-          start,
-          end,
-          batch_size: batchSize
-        })
+      const data = await apiPost('/api/send', {
+        url: state.novel.source_url,
+        recipients,
+        start,
+        end,
+        batch_size: batchSize
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Delivery failed.');
       setStatus(
         $('sendStatus'),
         `Sent ${data.chapters} chapters in ${data.emails_per_recipient} email${data.emails_per_recipient === 1 ? '' : 's'} per recipient.`,
