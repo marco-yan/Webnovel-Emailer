@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 import time
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
@@ -31,12 +33,68 @@ def _assert_allowed(url: str, allowed_domain: str) -> None:
         raise ValueError(f"Refusing URL outside configured domain: {host}")
 
 
+def _assert_public_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Only public http(s) URLs are supported")
+
+    host = parsed.hostname.lower().rstrip(".")
+    if host in {"localhost", "localhost.localdomain"} or host.endswith(".localhost"):
+        raise ValueError("Local network addresses are not supported")
+
+    try:
+        direct_ip = ipaddress.ip_address(host)
+    except ValueError:
+        direct_ip = None
+
+    if direct_ip is not None:
+        if not direct_ip.is_global:
+            raise ValueError("Private or reserved network addresses are not supported")
+        return
+
+    try:
+        addresses = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        raise ValueError("Could not resolve the source website") from exc
+
+    if not addresses:
+        raise ValueError("Could not resolve the source website")
+
+    for entry in addresses:
+        address = entry[4][0]
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        if not ip.is_global:
+            raise ValueError("Private or reserved network addresses are not supported")
+
+
 def _get(url: str, cfg: dict) -> requests.Response:
-    _assert_allowed(url, cfg["allowed_domain"])
     headers = {"User-Agent": cfg.get("user_agent", "Webnovel-Emailer/2.0")}
-    response = requests.get(url, headers=headers, timeout=30)
-    response.raise_for_status()
-    return response
+    current = url
+
+    for _ in range(4):
+        _assert_allowed(current, cfg["allowed_domain"])
+        _assert_public_url(current)
+        response = requests.get(
+            current,
+            headers=headers,
+            timeout=30,
+            allow_redirects=False,
+        )
+
+        if response.status_code in {301, 302, 303, 307, 308}:
+            location = response.headers.get("Location")
+            if not location:
+                response.raise_for_status()
+            current = urljoin(current, location)
+            continue
+
+        response.raise_for_status()
+        return response
+
+    raise ValueError("Too many redirects while opening the source website")
 
 
 def _chapter_number(text: str, href: str) -> int | None:
@@ -78,8 +136,8 @@ def _lightnovelworld_chapters(index_url: str, soup: BeautifulSoup) -> list[Chapt
     total = max(matches)
     base = index_url.rstrip("/") + "/"
 
-    # LightNovelWorld uses stable numeric chapter routes. We only construct links here;
-    # this web app does not copy chapter prose from third-party novels.
+    # LightNovelWorld exposes stable numbered chapter routes. The public app
+    # organizes source links; it does not reproduce third-party chapter prose.
     by_number: dict[int, Chapter] = {
         number: Chapter(
             title=f"Chapter {number}",
@@ -89,7 +147,7 @@ def _lightnovelworld_chapters(index_url: str, soup: BeautifulSoup) -> list[Chapt
         for number in range(1, total + 1)
     }
 
-    # Overlay any chapter titles already exposed in the novel page HTML.
+    # Keep any chapter titles that are already present on the novel page.
     for node in soup.select("a[href]"):
         href = node.get("href") or ""
         label = node.get_text(" ", strip=True)
@@ -137,6 +195,7 @@ def discover_novel(index_url: str) -> Novel:
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("Enter a valid http(s) novel URL")
 
+    _assert_public_url(index_url)
     allowed_domain = parsed.hostname.lower()
     cfg = {
         "allowed_domain": allowed_domain,
