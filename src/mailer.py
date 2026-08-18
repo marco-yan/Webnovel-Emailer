@@ -14,16 +14,31 @@ def build_message(sender: str, recipient: str, subject: str, body: str) -> Email
     return msg
 
 
-def send_gmail(recipients: list[str], subject: str, body: str) -> None:
-    sender = os.environ.get("GMAIL_ADDRESS")
-    password = os.environ.get("GMAIL_APP_PASSWORD")
+def _credentials() -> tuple[str, str]:
+    sender = (os.environ.get("GMAIL_ADDRESS") or "").strip()
+    password = (os.environ.get("GMAIL_APP_PASSWORD") or "").strip()
     if not sender or not password:
         raise RuntimeError("GMAIL_ADDRESS and GMAIL_APP_PASSWORD must be set")
+    return sender, password
+
+
+def send_gmail(recipients: list[str], subject: str, body: str) -> None:
+    send_gmail_batches(recipients, [(subject, body)])
+
+
+def send_gmail_batches(recipients: list[str], messages: list[tuple[str, str]]) -> None:
+    """Send many reading batches through one SMTP session.
+
+    Each recipient receives an individual message so recipient addresses are not exposed.
+    """
     if not recipients:
         raise RuntimeError("At least one recipient is required")
+    if not messages:
+        raise RuntimeError("At least one message is required")
 
-    # Send one message per recipient so addresses are never exposed to one another.
+    sender, password = _credentials()
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
         smtp.login(sender, password)
-        for recipient in recipients:
-            smtp.send_message(build_message(sender, recipient, subject, body))
+        for subject, body in messages:
+            for recipient in recipients:
+                smtp.send_message(build_message(sender, recipient, subject, body))
