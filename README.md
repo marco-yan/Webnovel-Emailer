@@ -1,12 +1,23 @@
 # Webnovel Emailer
 
-A Python + GitHub Actions project for turning serial-fiction chapter feeds into **low-noise reading digests**. The project discovers chapter links, remembers delivery progress, batches several chapters into one email, and can send the same reading batch privately to multiple recipients.
+Webnovel Emailer turns a web-novel chapter range into clean Gmail reading batches without making the reader touch GitHub, edit YAML, or know CSS selectors.
 
-## Live setup page
+## End-user flow
 
-GitHub Pages: `https://marco-yan.github.io/Webnovel-Emailer/`
+1. Paste a novel URL.
+2. The app detects the title and chapter count.
+3. Choose an inclusive chapter range, such as **30 through 400**.
+4. Choose how many chapters should go in each email, such as **10**.
+5. Enter one or more recipient email addresses.
+6. Press **Send selected chapters**.
 
-The setup dashboard uses the project palette:
+For the example above, 371 selected chapters become 38 emails per recipient.
+
+The public web interface deliberately hides developer configuration. GitHub remains the code repository, not the product UI.
+
+## Interface
+
+The UI uses the project palette:
 
 ```css
 :root {
@@ -18,155 +29,132 @@ The setup dashboard uses the project palette:
 }
 ```
 
-The Pages interface generates the non-secret GitHub Actions variables. Gmail credentials remain in GitHub Secrets and are never entered into the website.
+The main screen contains only three steps: novel link, chapter range/batch size, and recipients. Advanced scraper selectors and GitHub variables are no longer part of the reader-facing workflow.
 
-## What it does
-
-- Discovers chapter links from a configured source/index page.
-- Deduplicates discovered chapters and tracks reading-delivery progress in `data/state.json`.
-- Sends a configurable number of chapters in **one digest per run**.
-- Supports one or many recipients through `RECIPIENT_EMAILS`.
-- Sends each recipient a separate email so recipient addresses are not exposed to one another.
-- Runs manually in preview/dry-run mode or automatically on GitHub Actions.
-- Current scheduled cadence: Monday, Wednesday, and Friday at 12:00 UTC.
-- Includes a responsive GitHub Pages configuration dashboard and email preview.
-- Supports links-only delivery by default and authorized full-text extraction when explicitly enabled.
-
-## Content-use rule
-
-This project is intentionally **not configured to copy paywalled, copyrighted, or unauthorized third-party novels**. The default delivery mode is `links_only`. Full-text delivery requires both:
-
-1. `delivery_mode: full_text`
-2. `rights_confirmed: true`
-
-Use full-text mode only for material you wrote, material in the public domain, or material you have permission to reproduce.
-
-## Architecture
+## Web architecture
 
 ```text
-Source index / TOC
-      |
-      v
-chapter discovery ---> dedupe / ordering
-      |
-      v
-extractor (links-only OR authorized full text)
-      |
-      v
-progress state (`data/state.json`)
-      |
-      v
-batch renderer
-      |
-      v
-Gmail SMTP ---> Reader A
-           ---> Reader B
-           ---> Reader C
-      ^
-      |
-GitHub Actions schedule / manual run
+Browser
+  |
+  | 1. Paste novel URL
+  v
+POST /api/novel
+  |
+  v
+Automatic chapter detection
+  |
+  | title + chapter count
+  v
+Range picker
+  |
+  | 2. Select 30-400, batch size 10
+  v
+POST /api/send
+  |
+  v
+Batch planner
+  |
+  v
+Gmail SMTP
+  |----> Reader A
+  |----> Reader B
+  `----> Reader C
 ```
 
-## GitHub configuration
+The production target is Vercel. `vercel.json` serves the minimal interface and Python API functions from the same application, so end users never need to visit GitHub.
 
-### Repository Secrets
+GitHub Pages remains available as a static front-end preview during development.
 
-Add these under **Settings → Secrets and variables → Actions → Secrets**:
+## Automatic chapter detection
+
+`src/scraper.py` now supports automatic discovery rather than requiring end users to supply CSS selectors.
+
+- LightNovelWorld has a dedicated adapter that reads the reported chapter count and constructs its numbered chapter routes.
+- Other sites use generic numbered-chapter link detection.
+- Additional source adapters can be added without changing the public UI.
+
+The browser-facing application sends chapter titles and source links. It does not bulk-copy third-party novel prose.
+
+## Multiple recipients
+
+Recipients may be separated by commas, semicolons, or new lines. Duplicate addresses are removed. Each person receives an individual email so recipient addresses are not exposed to one another.
+
+## Safety limits
+
+The web endpoint limits a single request to 50 batch emails and 100 total outbound messages across all recipients. This prevents an accidental chapter selection from flooding an inbox or exhausting Gmail/Vercel execution limits.
+
+## Deployment
+
+### Vercel - intended production deployment
+
+Connect this GitHub repository to a Vercel project and add these environment variables:
 
 - `GMAIL_ADDRESS`
 - `GMAIL_APP_PASSWORD`
 
-Never commit Gmail credentials to the repository.
+No reader-facing configuration is required after deployment. The app calls `/api/novel` and `/api/send` behind the scenes.
 
-### Repository Variables
+### GitHub
 
-The Pages dashboard generates these under **Settings → Secrets and variables → Actions → Variables**:
-
-- `SOURCE_INDEX_URL`
-- `SOURCE_ALLOWED_DOMAIN`
-- `RECIPIENT_EMAILS`
-- `CHAPTERS_PER_EMAIL`
-- `DELIVERY_MODE`
-- `RIGHTS_CONFIRMED`
-- `CHAPTER_LINK_SELECTOR`
-- `CHAPTER_TITLE_SELECTOR`
-- `CHAPTER_BODY_SELECTOR`
-
-`RECIPIENT_EMAILS` accepts comma-, semicolon-, or newline-separated addresses. The legacy `RECIPIENT_EMAIL` variable is still accepted for backwards compatibility.
-
-## Configuration example
-
-```yaml
-source:
-  index_url: "https://example.org/book/"
-  chapter_link_selector: "a.chapter-link"
-  chapter_title_selector: "h1"
-  chapter_body_selector: "article.chapter"
-  allowed_domain: "example.org"
-
-delivery:
-  recipients:
-    - "reader.one@example.com"
-    - "reader.two@example.com"
-  chapters_per_email: 3
-  delivery_mode: "links_only"
-  rights_confirmed: false
-  subject_prefix: "Reading batch"
-```
-
-## First run
-
-1. Add the two Gmail repository secrets.
-2. Open the GitHub Pages dashboard.
-3. Enter the source URL and one or more recipient emails.
-4. Generate the repository variables and add them to GitHub.
-5. Open **Actions → Deliver reading batch**.
-6. Use **Run workflow** with `dry_run=true` to verify chapter discovery without sending email.
-7. When the preview is correct, run again with `dry_run=false`.
+The repository still contains the older GitHub Actions delivery workflow as a backend/fallback implementation. It is not the intended reader experience.
 
 ## Project structure
 
 ```text
-.github/workflows/deliver.yml
-.github/workflows/pages.yml
-config.example.yaml
-data/state.json
-docs/index.html
-src/main.py
-src/mailer.py
-src/scraper.py
+api/
+  novel.py             # detect title + chapter range
+  send.py              # send selected range in batches
+src/
+  scraper.py           # automatic source adapters
+  mailer.py            # Gmail SMTP
+  web_service.py       # recipients, ranges, batching
+  main.py              # legacy CLI / Actions path
+docs/
+  index.html           # minimal public interface
 tests/
+vercel.json
 requirements.txt
 ```
 
-## Development
+## Example
+
+A reader pastes a novel with 500 detected chapters and chooses:
+
+```text
+Start chapter:        30
+End chapter:          400
+Chapters per email:   10
+```
+
+The range is inclusive:
+
+```text
+400 - 30 + 1 = 371 chapters
+ceil(371 / 10) = 38 emails per recipient
+```
+
+The last email contains chapter 400 rather than silently dropping the remainder.
+
+## Local development
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp config.example.yaml config.yaml
-python -m src.main --config config.yaml --dry-run
-```
-
-Run tests:
-
-```bash
 pytest -q
 ```
 
-## Security and privacy
+## Security
 
-- Gmail credentials live only in GitHub Actions secrets.
-- The Pages dashboard never asks for or stores the Gmail App Password.
-- Recipient addresses are sent as separate messages rather than one visible group message.
-- The workflow restricts chapter traversal to the configured source domain.
-- The workflow gets only the repository permissions required to save delivery progress.
+- Gmail credentials are environment secrets, never browser fields.
+- Recipient addresses are not stored by the web API.
+- Source traversal is restricted to the novel's own domain.
+- Third-party novel text is not reproduced by the public web workflow.
 
 ## Portfolio angle
 
-This repository demonstrates web parsing, stateful automation, SMTP integration, secrets management, multi-recipient delivery, GitHub Actions scheduling, static front-end configuration, responsive UI work, testing, and deployment through GitHub Pages.
+The project demonstrates product simplification, web scraping/adapters, inclusive range logic, batching, multi-recipient email delivery, serverless Python APIs, secret management, automated testing, and deployment architecture while keeping the actual reader experience intentionally simple.
 
 ## License
 
-Code in this repository is MIT licensed. Content retrieved from third-party sources remains subject to the source material's rights and terms.
+Code in this repository is MIT licensed. Content on third-party source websites remains subject to the source site's rights and terms.
