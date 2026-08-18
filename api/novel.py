@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from http.server import BaseHTTPRequestHandler
 
+from src.auth import require_access_key
 from src.scraper import discover_novel
 
 
@@ -18,6 +19,7 @@ class handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         try:
+            require_access_key(self.headers.get("X-App-Key"))
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length) or b"{}")
             url = str(payload.get("url", "")).strip()
@@ -30,5 +32,9 @@ class handler(BaseHTTPRequestHandler):
                     "total_chapters": len(novel.chapters),
                 },
             )
+        except PermissionError as exc:
+            self._json(401, {"error": str(exc), "code": "ACCESS_DENIED"})
+        except RuntimeError as exc:
+            self._json(503, {"error": str(exc), "code": "SERVER_NOT_CONFIGURED"})
         except Exception as exc:
             self._json(400, {"error": str(exc)})
