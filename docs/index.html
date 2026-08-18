@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Webnovel Emailer Setup</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 760px; margin: 48px auto; padding: 0 20px; line-height: 1.5; }
+    h1 { margin-bottom: 8px; }
+    .muted { color: #555; }
+    label { display:block; font-weight:600; margin-top:18px; }
+    input, select { width:100%; box-sizing:border-box; padding:10px; margin-top:6px; }
+    button { margin-top:24px; padding:12px 16px; cursor:pointer; }
+    pre { white-space:pre-wrap; background:#f5f5f5; padding:16px; border-radius:8px; overflow:auto; }
+    .notice { background:#fff8dc; padding:12px 14px; border-radius:8px; margin:18px 0; }
+  </style>
+</head>
+<body>
+  <h1>Webnovel Emailer</h1>
+  <p class="muted">Generate the repository settings for a low-noise chapter delivery workflow.</p>
+
+  <div class="notice">
+    Full-text mode is only for material you wrote, public-domain material, or content you have permission to reproduce. Otherwise use links-only mode.
+  </div>
+
+  <label>Source / table-of-contents URL
+    <input id="url" placeholder="https://example.org/novel/" />
+  </label>
+
+  <label>Recipient email
+    <input id="email" type="email" placeholder="you@gmail.com" />
+  </label>
+
+  <label>Chapters per email
+    <input id="batch" type="number" min="1" max="50" value="3" />
+  </label>
+
+  <label>Delivery mode
+    <select id="mode">
+      <option value="links_only">Links only</option>
+      <option value="full_text">Full text (authorized content only)</option>
+    </select>
+  </label>
+
+  <label>Chapter-link CSS selector
+    <input id="linkSelector" value="a.chapter-link" />
+  </label>
+
+  <label>Chapter-title CSS selector
+    <input id="titleSelector" value="h1" />
+  </label>
+
+  <label>Chapter-body CSS selector
+    <input id="bodySelector" value="article.chapter" />
+  </label>
+
+  <button onclick="generate()">Generate setup values</button>
+
+  <h2>Repository variables</h2>
+  <pre id="out">Fill in the form above.</pre>
+
+  <h2>Gmail secrets</h2>
+  <p>Add these separately in GitHub under <strong>Settings → Secrets and variables → Actions</strong>:</p>
+  <pre>GMAIL_ADDRESS=your Gmail address
+GMAIL_APP_PASSWORD=your Google App Password</pre>
+  <p>This page never asks for or stores your password.</p>
+
+<script>
+function generate() {
+  const url = document.getElementById('url').value.trim();
+  const email = document.getElementById('email').value.trim();
+  const batch = document.getElementById('batch').value || '3';
+  const mode = document.getElementById('mode').value;
+  const linkSelector = document.getElementById('linkSelector').value.trim();
+  const titleSelector = document.getElementById('titleSelector').value.trim();
+  const bodySelector = document.getElementById('bodySelector').value.trim();
+  let domain = '';
+  try { domain = new URL(url).hostname; } catch (_) {}
+
+  const values = [
+    ['SOURCE_INDEX_URL', url],
+    ['SOURCE_ALLOWED_DOMAIN', domain],
+    ['RECIPIENT_EMAIL', email],
+    ['CHAPTERS_PER_EMAIL', batch],
+    ['DELIVERY_MODE', mode],
+    ['RIGHTS_CONFIRMED', mode === 'full_text' ? 'true' : 'false'],
+    ['CHAPTER_LINK_SELECTOR', linkSelector],
+    ['CHAPTER_TITLE_SELECTOR', titleSelector],
+    ['CHAPTER_BODY_SELECTOR', bodySelector]
+  ];
+  document.getElementById('out').textContent = values.map(([k,v]) => `${k}=${v}`).join('\n');
+}
+</script>
+</body>
+</html>
