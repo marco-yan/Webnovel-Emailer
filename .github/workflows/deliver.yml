@@ -1,0 +1,105 @@
+name: Deliver reading batch
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Preview only (no email, no progress update)"
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    - cron: "0 12 * * 1,3,5"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reading-delivery
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build runtime configuration
+        env:
+          SOURCE_INDEX_URL: ${{ vars.SOURCE_INDEX_URL }}
+          SOURCE_ALLOWED_DOMAIN: ${{ vars.SOURCE_ALLOWED_DOMAIN }}
+          CHAPTER_LINK_SELECTOR: ${{ vars.CHAPTER_LINK_SELECTOR }}
+          CHAPTER_TITLE_SELECTOR: ${{ vars.CHAPTER_TITLE_SELECTOR }}
+          CHAPTER_BODY_SELECTOR: ${{ vars.CHAPTER_BODY_SELECTOR }}
+          RECIPIENT_EMAIL: ${{ vars.RECIPIENT_EMAIL }}
+          CHAPTERS_PER_EMAIL: ${{ vars.CHAPTERS_PER_EMAIL }}
+          DELIVERY_MODE: ${{ vars.DELIVERY_MODE }}
+          RIGHTS_CONFIRMED: ${{ vars.RIGHTS_CONFIRMED }}
+        run: |
+          python - <<'PY'
+          import os, urllib.parse, yaml
+
+          index = os.environ.get("SOURCE_INDEX_URL", "").strip()
+          if not index:
+              raise SystemExit("Set repository variable SOURCE_INDEX_URL")
+          recipient = os.environ.get("RECIPIENT_EMAIL", "").strip()
+          if not recipient:
+              raise SystemExit("Set repository variable RECIPIENT_EMAIL")
+          host = urllib.parse.urlparse(index).hostname or ""
+          cfg = {
+              "source": {
+                  "index_url": index,
+                  "allowed_domain": os.environ.get("SOURCE_ALLOWED_DOMAIN", "").strip() or host,
+                  "chapter_link_selector": os.environ.get("CHAPTER_LINK_SELECTOR", "a.chapter-link").strip(),
+                  "chapter_title_selector": os.environ.get("CHAPTER_TITLE_SELECTOR", "h1").strip(),
+                  "chapter_body_selector": os.environ.get("CHAPTER_BODY_SELECTOR", "article.chapter").strip(),
+                  "request_delay_seconds": 2.0,
+                  "user_agent": "Webnovel-Emailer/1.0 (+personal reading automation)",
+              },
+              "delivery": {
+                  "recipient": recipient,
+                  "chapters_per_email": int(os.environ.get("CHAPTERS_PER_EMAIL", "3") or 3),
+                  "delivery_mode": os.environ.get("DELIVERY_MODE", "links_only").strip() or "links_only",
+                  "rights_confirmed": os.environ.get("RIGHTS_CONFIRMED", "false").lower() == "true",
+                  "subject_prefix": "Reading batch",
+                  "include_source_link": True,
+              },
+              "state": {"path": "data/state.json"},
+          }
+          with open("config.yaml", "w", encoding="utf-8") as f:
+              yaml.safe_dump(cfg, f, sort_keys=False)
+          PY
+
+      - name: Deliver or preview
+        env:
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            python -m src.main --config config.yaml --dry-run
+          else
+            python -m src.main --config config.yaml
+          fi
+
+      - name: Save delivery progress
+        if: ${{ github.event_name == 'schedule' || inputs.dry_run == false }}
+        run: |
+          if git diff --quiet -- data/state.json; then
+            echo "No state change."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/state.json
+          git commit -m "Update reading delivery progress"
+          git push
