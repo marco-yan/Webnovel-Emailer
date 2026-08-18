@@ -8,7 +8,9 @@ source:
   user_agent: "Webnovel-Emailer/1.0 (+personal reading automation)"
 
 delivery:
-  recipient: "you@example.com"
+  recipients:
+    - "reader-one@example.com"
+    - "reader-two@example.com"
   chapters_per_email: 3
   delivery_mode: "links_only" # links_only | full_text
   rights_confirmed: false
