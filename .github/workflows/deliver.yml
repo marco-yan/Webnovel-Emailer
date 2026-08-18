@@ -41,20 +41,31 @@ jobs:
           CHAPTER_LINK_SELECTOR: ${{ vars.CHAPTER_LINK_SELECTOR }}
           CHAPTER_TITLE_SELECTOR: ${{ vars.CHAPTER_TITLE_SELECTOR }}
           CHAPTER_BODY_SELECTOR: ${{ vars.CHAPTER_BODY_SELECTOR }}
+          RECIPIENT_EMAILS: ${{ vars.RECIPIENT_EMAILS }}
           RECIPIENT_EMAIL: ${{ vars.RECIPIENT_EMAIL }}
           CHAPTERS_PER_EMAIL: ${{ vars.CHAPTERS_PER_EMAIL }}
           DELIVERY_MODE: ${{ vars.DELIVERY_MODE }}
           RIGHTS_CONFIRMED: ${{ vars.RIGHTS_CONFIRMED }}
         run: |
           python - <<'PY'
-          import os, urllib.parse, yaml
+          import os, re, urllib.parse, yaml
 
           index = os.environ.get("SOURCE_INDEX_URL", "").strip()
           if not index:
               raise SystemExit("Set repository variable SOURCE_INDEX_URL")
-          recipient = os.environ.get("RECIPIENT_EMAIL", "").strip()
-          if not recipient:
-              raise SystemExit("Set repository variable RECIPIENT_EMAIL")
+
+          recipient_raw = (
+              os.environ.get("RECIPIENT_EMAILS", "").strip()
+              or os.environ.get("RECIPIENT_EMAIL", "").strip()
+          )
+          recipients = [
+              value.strip()
+              for value in re.split(r"[,;\n]+", recipient_raw)
+              if value.strip()
+          ]
+          if not recipients:
+              raise SystemExit("Set repository variable RECIPIENT_EMAILS")
+
           host = urllib.parse.urlparse(index).hostname or ""
           cfg = {
               "source": {
@@ -67,7 +78,7 @@ jobs:
                   "user_agent": "Webnovel-Emailer/1.0 (+personal reading automation)",
               },
               "delivery": {
-                  "recipient": recipient,
+                  "recipients": recipients,
                   "chapters_per_email": int(os.environ.get("CHAPTERS_PER_EMAIL", "3") or 3),
                   "delivery_mode": os.environ.get("DELIVERY_MODE", "links_only").strip() or "links_only",
                   "rights_confirmed": os.environ.get("RIGHTS_CONFIRMED", "false").lower() == "true",
