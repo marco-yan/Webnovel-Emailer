@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,6 +28,27 @@ def save_state(path: Path, state: dict) -> None:
     path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 
 
+def normalize_recipients(delivery: dict) -> list[str]:
+    raw = delivery.get("recipients", delivery.get("recipient", []))
+    if isinstance(raw, str):
+        values = re.split(r"[,;\n]+", raw)
+    else:
+        values = [str(value) for value in (raw or [])]
+
+    recipients: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        email = value.strip()
+        key = email.lower()
+        if email and key not in seen:
+            seen.add(key)
+            recipients.append(email)
+
+    if not recipients:
+        raise RuntimeError("At least one recipient email must be configured")
+    return recipients
+
+
 def render_batch(chapters: list[Chapter], mode: str, include_source_link: bool) -> str:
     chunks: list[str] = []
     for chapter in chapters:
@@ -46,6 +68,7 @@ def run(config_path: str, dry_run: bool = False) -> int:
     config = load_yaml(config_path)
     source = config["source"]
     delivery = config["delivery"]
+    recipients = normalize_recipients(delivery)
     state_path = Path(config.get("state", {}).get("path", "data/state.json"))
 
     mode = delivery.get("delivery_mode", "links_only")
@@ -79,16 +102,16 @@ def run(config_path: str, dry_run: bool = False) -> int:
     body = render_batch(batch, mode, bool(delivery.get("include_source_link", True)))
 
     if dry_run:
-        print(f"TO: {delivery['recipient']}")
+        print(f"TO: {', '.join(recipients)}")
         print(f"SUBJECT: {subject}\n")
         print(body)
         return 0
 
-    send_gmail(delivery["recipient"], subject, body)
+    send_gmail(recipients, subject, body)
     state["delivered"] = list(dict.fromkeys(state.get("delivered", []) + [c.url for c in batch]))
     state["last_run_utc"] = datetime.now(timezone.utc).isoformat()
     save_state(state_path, state)
-    print(f"Delivered {len(batch)} chapter(s).")
+    print(f"Delivered {len(batch)} chapter(s) to {len(recipients)} recipient(s).")
     return 0
 
 
