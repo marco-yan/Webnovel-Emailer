@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from http.server import BaseHTTPRequestHandler
 
+from src.auth import require_access_key
 from src.mailer import send_gmail_batches
 from src.scraper import discover_novel
 from src.web_service import build_plan, normalize_recipients, render_links_batch
@@ -20,6 +21,7 @@ class handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         try:
+            require_access_key(self.headers.get("X-App-Key"))
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length) or b"{}")
 
@@ -55,5 +57,9 @@ class handler(BaseHTTPRequestHandler):
                     "recipients": len(recipients),
                 },
             )
+        except PermissionError as exc:
+            self._json(401, {"error": str(exc), "code": "ACCESS_DENIED"})
+        except RuntimeError as exc:
+            self._json(503, {"error": str(exc), "code": "SERVER_NOT_CONFIGURED"})
         except Exception as exc:
             self._json(400, {"error": str(exc)})
