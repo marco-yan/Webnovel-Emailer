@@ -28,14 +28,6 @@ class handler(BaseHTTPRequestHandler):
                     "title": novel.title,
                     "source_url": novel.source_url,
                     "total_chapters": len(novel.chapters),
-                    "chapters": [
-                        {
-                            "number": chapter.number or index,
-                            "title": chapter.title,
-                            "url": chapter.url,
-                        }
-                        for index, chapter in enumerate(novel.chapters, start=1)
-                    ],
                 },
             )
         except Exception as exc:
