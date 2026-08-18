@@ -5,15 +5,16 @@ Webnovel Emailer turns a web-novel chapter range into clean Gmail reading batche
 ## End-user flow
 
 1. Paste a novel URL.
-2. The app detects the title and chapter count.
-3. Choose an inclusive chapter range, such as **30 through 400**.
-4. Choose how many chapters should go in each email, such as **10**.
-5. Enter one or more recipient email addresses.
-6. Press **Send selected chapters**.
+2. Enter the deployment access code once per browser session.
+3. The app detects the title and chapter count.
+4. Choose an inclusive chapter range, such as **30 through 400**.
+5. Choose how many chapters should go in each email, such as **10**.
+6. Enter one or more recipient email addresses.
+7. Press **Send selected chapters**.
 
 For the example above, 371 selected chapters become 38 emails per recipient.
 
-The public web interface deliberately hides developer configuration. GitHub remains the code repository, not the product UI.
+The public interface deliberately hides developer configuration. GitHub is the code repository, not the product UI.
 
 ## Interface
 
@@ -29,7 +30,7 @@ The UI uses the project palette:
 }
 ```
 
-The main screen contains only three steps: novel link, chapter range/batch size, and recipients. Advanced scraper selectors and GitHub variables are no longer part of the reader-facing workflow.
+The main screen contains only three visible steps: novel link, chapter range/batch size, and recipients. Scraper selectors, YAML, repository variables, and deployment controls are not part of the reader-facing workflow.
 
 ## Web architecture
 
@@ -61,15 +62,15 @@ Gmail SMTP
   `----> Reader C
 ```
 
-The production target is Vercel. `vercel.json` serves the minimal interface and Python API functions from the same application, so end users never need to visit GitHub.
+The production target is Vercel. `vercel.json` serves the minimal interface and Python API functions from the same application, so readers never need to visit GitHub.
 
-GitHub Pages remains available as a static front-end preview during development.
+GitHub Pages remains only as a development/static preview.
 
 ## Automatic chapter detection
 
-`src/scraper.py` now supports automatic discovery rather than requiring end users to supply CSS selectors.
+`src/scraper.py` supports automatic discovery rather than requiring end users to supply CSS selectors.
 
-- LightNovelWorld has a dedicated adapter that reads the reported chapter count and constructs its numbered chapter routes.
+- LightNovelWorld has a dedicated adapter that reads the reported chapter count and constructs numbered chapter routes.
 - Other sites use generic numbered-chapter link detection.
 - Additional source adapters can be added without changing the public UI.
 
@@ -81,18 +82,23 @@ Recipients may be separated by commas, semicolons, or new lines. Duplicate addre
 
 ## Safety limits
 
-The web endpoint limits a single request to 50 batch emails and 100 total outbound messages across all recipients. This prevents an accidental chapter selection from flooding an inbox or exhausting Gmail/Vercel execution limits.
+The web endpoint limits a single request to 50 batch emails and 100 total outbound messages across all recipients. The UI also asks for confirmation before sending more than 10 batches to each recipient.
+
+Source fetching rejects local/private network addresses and re-validates same-domain redirects before requesting them.
 
 ## Deployment
 
 ### Vercel - intended production deployment
 
-Connect this GitHub repository to a Vercel project and add these environment variables:
+Connect this repository to a Vercel project and add three environment variables:
 
-- `GMAIL_ADDRESS`
-- `GMAIL_APP_PASSWORD`
+- `GMAIL_ADDRESS` - Gmail account used to send the batches
+- `GMAIL_APP_PASSWORD` - Google App Password for that account
+- `APP_ACCESS_KEY` - a private code chosen by the deployment owner
 
-No reader-facing configuration is required after deployment. The app calls `/api/novel` and `/api/send` behind the scenes.
+The access code protects the Gmail-backed API from public abuse. Readers enter it once per browser session; it is not stored in the repository.
+
+After deployment, the application calls `/api/novel` and `/api/send` behind the scenes. No reader-facing GitHub configuration is required.
 
 ### GitHub
 
@@ -105,12 +111,13 @@ api/
   novel.py             # detect title + chapter range
   send.py              # send selected range in batches
 src/
-  scraper.py           # automatic source adapters
+  auth.py              # access-code protection
+  scraper.py           # automatic source adapters + URL safety
   mailer.py            # Gmail SMTP
   web_service.py       # recipients, ranges, batching
   main.py              # legacy CLI / Actions path
 docs/
-  index.html           # minimal public interface
+  index.html           # minimal reader interface
 tests/
 vercel.json
 requirements.txt
@@ -147,13 +154,14 @@ pytest -q
 ## Security
 
 - Gmail credentials are environment secrets, never browser fields.
+- The public APIs require `APP_ACCESS_KEY`.
 - Recipient addresses are not stored by the web API.
-- Source traversal is restricted to the novel's own domain.
+- Source traversal is restricted to the novel's own domain and public network addresses.
 - Third-party novel text is not reproduced by the public web workflow.
 
 ## Portfolio angle
 
-The project demonstrates product simplification, web scraping/adapters, inclusive range logic, batching, multi-recipient email delivery, serverless Python APIs, secret management, automated testing, and deployment architecture while keeping the actual reader experience intentionally simple.
+The project demonstrates product simplification, web scraping/adapters, inclusive range logic, batching, multi-recipient email delivery, serverless Python APIs, secret management, SSRF-aware URL validation, automated testing, and deployment architecture while keeping the reader experience intentionally simple.
 
 ## License
 
