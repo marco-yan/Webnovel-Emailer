@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "cleanUrls": true,
+  "functions": {
+    "api/**/*.py": {
+      "maxDuration": 60,
+      "excludeFiles": "{tests/**,.github/**,data/**}"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/docs/index.html"
+    }
+  ]
+}
