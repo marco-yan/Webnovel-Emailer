@@ -1,17 +1,38 @@
 # Webnovel Emailer
 
-A small Python + GitHub Actions project for turning **public-domain or otherwise authorized serial fiction** into low-noise email reading batches.
+A Python + GitHub Actions project for turning serial-fiction chapter feeds into **low-noise reading digests**. The project discovers chapter links, remembers delivery progress, batches several chapters into one email, and can send the same reading batch privately to multiple recipients.
+
+## Live setup page
+
+GitHub Pages: `https://marco-yan.github.io/Webnovel-Emailer/`
+
+The setup dashboard uses the project palette:
+
+```css
+:root {
+  --background: #F7F6F0;
+  --text: #171A18;
+  --primary: #214E3B;
+  --secondary: #82906A;
+  --highlight: #C5A46D;
+}
+```
+
+The Pages interface generates the non-secret GitHub Actions variables. Gmail credentials remain in GitHub Secrets and are never entered into the website.
 
 ## What it does
 
-- Discovers chapter links from a configured source page.
-- Extracts chapter titles and, when explicitly authorized, chapter text.
-- Remembers reading progress in `data/state.json`.
-- Sends a configurable number of chapters in **one email per run** so your inbox does not get flooded.
-- Runs manually or on a schedule with GitHub Actions.
-- Includes a GitHub Pages setup helper in `docs/` that generates a safe configuration file without collecting passwords.
+- Discovers chapter links from a configured source/index page.
+- Deduplicates discovered chapters and tracks reading-delivery progress in `data/state.json`.
+- Sends a configurable number of chapters in **one digest per run**.
+- Supports one or many recipients through `RECIPIENT_EMAILS`.
+- Sends each recipient a separate email so recipient addresses are not exposed to one another.
+- Runs manually in preview/dry-run mode or automatically on GitHub Actions.
+- Current scheduled cadence: Monday, Wednesday, and Friday at 12:00 UTC.
+- Includes a responsive GitHub Pages configuration dashboard and email preview.
+- Supports links-only delivery by default and authorized full-text extraction when explicitly enabled.
 
-## Important content-use rule
+## Content-use rule
 
 This project is intentionally **not configured to copy paywalled, copyrighted, or unauthorized third-party novels**. The default delivery mode is `links_only`. Full-text delivery requires both:
 
@@ -35,25 +56,45 @@ extractor (links-only OR authorized full text)
 progress state (`data/state.json`)
       |
       v
-batch renderer ---> Gmail SMTP ---> one digest email
+batch renderer
+      |
+      v
+Gmail SMTP ---> Reader A
+           ---> Reader B
+           ---> Reader C
       ^
       |
 GitHub Actions schedule / manual run
 ```
 
-## Quick start
+## GitHub configuration
 
-1. Copy `config.example.yaml` to `config.yaml`.
-2. Set your source URL, CSS selectors, recipient email, batch size, and delivery mode.
-3. In GitHub go to **Settings → Secrets and variables → Actions** and add:
-   - `GMAIL_ADDRESS`
-   - `GMAIL_APP_PASSWORD`
-4. Run **Actions → Deliver reading batch → Run workflow**.
-5. Optional: enable GitHub Pages using the `docs/` folder for the configuration helper.
+### Repository Secrets
 
-Google currently requires 2-Step Verification before an App Password can be created for eligible accounts. Never commit the App Password to the repository.
+Add these under **Settings → Secrets and variables → Actions → Secrets**:
 
-## Configuration
+- `GMAIL_ADDRESS`
+- `GMAIL_APP_PASSWORD`
+
+Never commit Gmail credentials to the repository.
+
+### Repository Variables
+
+The Pages dashboard generates these under **Settings → Secrets and variables → Actions → Variables**:
+
+- `SOURCE_INDEX_URL`
+- `SOURCE_ALLOWED_DOMAIN`
+- `RECIPIENT_EMAILS`
+- `CHAPTERS_PER_EMAIL`
+- `DELIVERY_MODE`
+- `RIGHTS_CONFIRMED`
+- `CHAPTER_LINK_SELECTOR`
+- `CHAPTER_TITLE_SELECTOR`
+- `CHAPTER_BODY_SELECTOR`
+
+`RECIPIENT_EMAILS` accepts comma-, semicolon-, or newline-separated addresses. The legacy `RECIPIENT_EMAIL` variable is still accepted for backwards compatibility.
+
+## Configuration example
 
 ```yaml
 source:
@@ -64,28 +105,36 @@ source:
   allowed_domain: "example.org"
 
 delivery:
-  recipient: "you@example.com"
+  recipients:
+    - "reader.one@example.com"
+    - "reader.two@example.com"
   chapters_per_email: 3
-  delivery_mode: "links_only" # links_only | full_text
+  delivery_mode: "links_only"
   rights_confirmed: false
   subject_prefix: "Reading batch"
-
-schedule:
-  enabled: true
 ```
 
-## GitHub Pages helper
+## First run
 
-`docs/index.html` is a static setup helper. It does **not** collect or store Gmail credentials. It generates a `config.yaml` you can download and place in the repository.
+1. Add the two Gmail repository secrets.
+2. Open the GitHub Pages dashboard.
+3. Enter the source URL and one or more recipient emails.
+4. Generate the repository variables and add them to GitHub.
+5. Open **Actions → Deliver reading batch**.
+6. Use **Run workflow** with `dry_run=true` to verify chapter discovery without sending email.
+7. When the preview is correct, run again with `dry_run=false`.
 
 ## Project structure
 
 ```text
 .github/workflows/deliver.yml
+.github/workflows/pages.yml
 config.example.yaml
 data/state.json
-docs/
-src/
+docs/index.html
+src/main.py
+src/mailer.py
+src/scraper.py
 tests/
 requirements.txt
 ```
@@ -94,7 +143,7 @@ requirements.txt
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp config.example.yaml config.yaml
 python -m src.main --config config.yaml --dry-run
@@ -106,16 +155,17 @@ Run tests:
 pytest -q
 ```
 
-## Security
+## Security and privacy
 
 - Gmail credentials live only in GitHub Actions secrets.
-- The Pages helper never asks for an App Password.
-- The workflow gets only the permissions it needs.
-- `config.yaml` may contain a recipient address, so use a private repository if you do not want that address public.
+- The Pages dashboard never asks for or stores the Gmail App Password.
+- Recipient addresses are sent as separate messages rather than one visible group message.
+- The workflow restricts chapter traversal to the configured source domain.
+- The workflow gets only the repository permissions required to save delivery progress.
 
 ## Portfolio angle
 
-This repository demonstrates web parsing, stateful automation, SMTP integration, GitHub Actions, static front-end configuration, testing, and safe credential handling in one compact project.
+This repository demonstrates web parsing, stateful automation, SMTP integration, secrets management, multi-recipient delivery, GitHub Actions scheduling, static front-end configuration, responsive UI work, testing, and deployment through GitHub Pages.
 
 ## License
 
